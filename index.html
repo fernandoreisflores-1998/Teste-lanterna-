@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Teste de Lanterna</title>
+</head>
+<body style="font-family: sans-serif; text-align: center; padding: 20px;">
+
+    <h3>Monitor de Autonomia</h3>
+    <video id="video" width="100%" max-width="320" autoplay playsinline style="border: 2px solid #ccc;"></video>
+    <p id="status">Iniciando câmera...</p>
+
+    <script>
+        const video = document.getElementById('video');
+        const status = document.getElementById('status');
+        const horaInicio = new Date();
+        let limiar = 20; 
+        let detectado = false;
+
+        navigator.mediaDevices.getUserMedia({ video: true, facingMode: 'environment' })
+        .then(stream => {
+            video.srcObject = stream;
+            status.innerText = "Monitorando...";
+        })
+        .catch(err => {
+            status.innerText = "Erro ao acessar a câmera: " + err;
+        });
+
+        setInterval(() => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 320; 
+            canvas.height = 240;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, 320, 240);
+            
+            const frame = ctx.getImageData(0, 0, 320, 240).data;
+            let brilho = 0;
+            for (let i = 0; i < frame.length; i += 4) {
+                brilho += (frame[i] + frame[i+1] + frame[i+2]) / 3;
+            }
+            brilho = brilho / (320 * 240);
+
+            if (!detectado && brilho < limiar) {
+                const horaFim = new Date();
+                const duracaoMs = horaFim - horaInicio;
+                const horas = Math.floor(duracaoMs / 3600000);
+                const minutos = Math.floor((duracaoMs % 3600000) / 60000);
+                const segundos = Math.floor((duracaoMs % 60000) / 1000);
+
+                status.innerHTML = `
+                    <div style="font-size: 20px; border: 3px solid green; padding: 15px; background: #e8f5e9; border-radius: 10px;">
+                        <strong>Apagou!</strong><br>
+                        Fim: ${horaFim.toLocaleTimeString()}<br>
+                        Duração: ${horas}h ${minutos}m ${segundos}s
+                    </div>
+                `;
+                detectado = true;
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
