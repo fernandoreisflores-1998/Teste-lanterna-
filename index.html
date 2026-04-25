@@ -1,121 +1,111 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Monitor de Autonomia Pro</title>
-    <link rel="manifest" href='data:application/json,{"name":"Monitor de Autonomia","short_name":"AutonomiaPro","start_url":"./","display":"standalone","background_color":"#ffffff","theme_color":"#28a745","icons":[{"src":"https://cdn-icons-png.flaticon.com/512/2906/2906274.png","sizes":"192x192","type":"image/png"}]}'>
-    <style>
-        body { font-family: sans-serif; padding: 10px; text-align: center; background: #f4f4f4; }
-        #video-container { position: relative; display: inline-block; }
-        #video { width: 300px; height: 225px; background: black; border: 3px solid #555; }
-        #foco { position: absolute; top: 75px; left: 100px; width: 100px; height: 75px; border: 2px dashed #0f0; pointer-events: none; }
-        button { padding: 12px 24px; font-size: 16px; border-radius: 8px; border: none; cursor: pointer; margin: 5px; font-weight: bold; }
-        #btnIniciar { background: #28a745; color: white; }
-        #btnReiniciar { background: #ffc107; display: none; }
-        #btnLimpar { background: #dc3545; color: white; font-size: 12px; }
-        #status { font-size: 16px; margin: 15px; color: #333; font-weight: bold; padding: 10px; background: white; border-radius: 5px; }
-        .teste-item { border-bottom: 1px solid #ccc; padding: 8px; background: #fff; text-align: left; }
-    </style>
-</head>
-<body>
+<script>
+    // Registro Offline
+    if ('serviceWorker' in navigator) {
+        const swCode = `self.addEventListener('fetch', (e) => { e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))); });`;
+        const blob = new Blob([swCode], {type: 'application/javascript'});
+        navigator.serviceWorker.register(URL.createObjectURL(blob));
+    }
 
-    <h3>Monitor de Autonomia Pro</h3>
-    <div id="video-container">
-        <video id="video" autoplay playsinline muted></video>
-        <div id="foco"></div>
-    </div>
-    <br>
-    <button id="btnIniciar">INICIAR MONITORAMENTO</button>
-    <button id="btnReiniciar">REINICIAR TESTE</button>
-    <div id="status">Aguardando câmera...</div>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function tocarBip() {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+        osc.start(); osc.stop(audioCtx.currentTime + 1.5);
+    }
+
+    const video = document.getElementById('video'), status = document.getElementById('status'),
+          btnIniciar = document.getElementById('btnIniciar'), btnReiniciar = document.getElementById('btnReiniciar'),
+          divHistorico = document.getElementById('historico');
     
-    <h4>Histórico:</h4>
-    <button id="btnLimpar">LIMPAR HISTÓRICO</button>
-    <div id="historico" style="text-align: left; font-size: 14px; margin-top: 10px;"></div>
+    const canvas = document.createElement('canvas'); 
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const foco = { x: 100, y: 75, w: 100, h: 75 };
 
-    <script>
-        // Registrar Offline
-        if ('serviceWorker' in navigator) {
-            const swCode = `self.addEventListener('fetch', (e) => { e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))); });`;
-            const blob = new Blob([swCode], {type: 'application/javascript'});
-            navigator.serviceWorker.register(URL.createObjectURL(blob));
-        }
+    let rodando = false, esperandoLanterna = false, base = 0, falhas = 0, horaInicio;
 
-        // Função de Bip
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        function tocarBip() {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            osc.type = 'square';
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
-            osc.start(); osc.stop(audioCtx.currentTime + 1.5);
-        }
-
-        const video = document.getElementById('video'), status = document.getElementById('status'),
-              btnIniciar = document.getElementById('btnIniciar'), btnReiniciar = document.getElementById('btnReiniciar'),
-              divHistorico = document.getElementById('historico');
-        
-        const canvas = document.createElement('canvas'); 
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        const foco = { x: 100, y: 75, w: 100, h: 75 };
-
-        let rodando = false, esperandoLanterna = false, base = 0, falhas = 0, horaInicio;
-
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+    // Função de inicialização da câmera com tratamento de erro robusto
+    function iniciarCamera() {
+        status.innerText = "Solicitando acesso à câmera...";
+        navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: { ideal: "environment" }, 
+                width: { ideal: 320 }, 
+                height: { ideal: 240 } 
+            } 
+        })
         .then(stream => { 
             video.srcObject = stream; 
-            status.innerText = "Câmera pronta! Aponte a lanterna DESLIGADA para o quadrado verde."; 
+            status.innerText = "Câmera pronta! Aponte a lanterna DESLIGADA para o quadrado verde.";
+            console.log("Câmera conectada com sucesso.");
+        })
+        .catch(err => { 
+            status.innerHTML = "<strong>ERRO:</strong> Câmera negada ou indisponível. Recarregue a página.";
+            console.error("Erro na câmera:", err);
         });
+    }
 
-        function carregarHistorico() {
-            const logs = JSON.parse(localStorage.getItem('testes') || '[]');
-            divHistorico.innerHTML = logs.map(t => `<div class="teste-item"><b>${t.nome}:</b> ${t.duracao} (Início: ${t.inicio})</div>`).join('');
+    // Tenta iniciar a câmera assim que a página carregar
+    window.addEventListener('load', iniciarCamera);
+
+    function carregarHistorico() {
+        const logs = JSON.parse(localStorage.getItem('testes') || '[]');
+        divHistorico.innerHTML = logs.map(t => `<div class="teste-item"><b>${t.nome}:</b> ${t.duracao} (Início: ${t.inicio})</div>`).join('');
+    }
+
+    function getBrilhoCentro() {
+        if (video.readyState !== video.HAVE_ENOUGH_DATA) return 0;
+        ctx.drawImage(video, 0, 0, 320, 240);
+        const data = ctx.getImageData(foco.x, foco.y, foco.w, foco.h).data;
+        let soma = 0;
+        for (let i = 0; i < data.length; i += 4) soma += (data[i] + data[i+1] + data[i+2]) / 3;
+        return soma / (foco.w * foco.h);
+    }
+
+    btnIniciar.onclick = () => {
+        base = getBrilhoCentro();
+        status.innerText = "Ligue a lanterna e aponte para o quadrado verde.";
+        esperandoLanterna = true;
+        btnIniciar.style.display = 'none';
+    };
+
+    btnReiniciar.onclick = () => location.reload();
+    document.getElementById('btnLimpar').onclick = () => { localStorage.removeItem('testes'); carregarHistorico(); };
+
+    setInterval(() => {
+        if (!esperandoLanterna && !rodando) return;
+        let brilho = getBrilhoCentro();
+
+        if (esperandoLanterna && brilho > base + 40) {
+            horaInicio = new Date();
+            rodando = true; esperandoLanterna = false;
+            status.innerText = "Monitorando... (Lanterna OK)";
+        } else if (rodando) {
+            if (brilho < base + 20) {
+                falhas++;
+                status.innerText = "Verificando sombra: " + falhas + "/6";
+                if (falhas >= 6) finalizarTeste();
+            } else { falhas = 0; status.innerText = "Monitorando... (Lanterna OK)"; }
         }
+    }, 500);
 
-        function getBrilhoCentro() {
-            ctx.drawImage(video, 0, 0, 320, 240);
-            const data = ctx.getImageData(foco.x, foco.y, foco.w, foco.h).data;
-            let soma = 0;
-            for (let i = 0; i < data.length; i += 4) soma += (data[i] + data[i+1] + data[i+2]) / 3;
-            return soma / (foco.w * foco.h);
-        }
+    function finalizarTeste() {
+        tocarBip();
+        const duracaoSegs = Math.round((new Date() - horaInicio) / 1000);
+        const duracaoStr = `${Math.floor(duracaoSegs/60)}m ${duracaoSegs%60}s`;
+        status.innerHTML = `<div style="color:red">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
+        
+        let logs = JSON.parse(localStorage.getItem('testes') || '[]');
+        logs.unshift({ nome: "Teste " + (logs.length + 1), inicio: horaInicio.toLocaleTimeString(), duracao: duracaoStr });
+        localStorage.setItem('testes', JSON.stringify(logs.slice(0, 3)));
+        
+        rodando = false;
+        btnReiniciar.style.display = 'inline-block';
+        carregarHistorico();
+    }
 
-        btnIniciar.onclick = () => {
-            base = getBrilhoCentro();
-            status.innerText = "Ligue a lanterna e aponte para o quadrado verde.";
-            esperandoLanterna = true;
-            btnIniciar.style.display = 'none';
-        };
-
-        btnReiniciar.onclick = () => location.reload();
-        document.getElementById('btnLimpar').onclick = () => { localStorage.removeItem('testes'); carregarHistorico(); };
-
-        setInterval(() => {
-            if (!esperandoLanterna && !rodando) return;
-            let brilho = getBrilhoCentro();
-
-            if (esperandoLanterna && brilho > base + 40) {
-                horaInicio = new Date();
-                rodando = true; esperandoLanterna = false;
-                status.innerText = "Monitorando... (Lanterna OK)";
-            } else if (rodando) {
-                if (brilho < base + 20) {
-                    falhas++;
-                    status.innerText = "Verificando sombra: " + falhas + "/6";
-                    if (falhas >= 6) finalizarTeste();
-                } else { falhas = 0; status.innerText = "Monitorando... (Lanterna OK)"; }
-            }
-        }, 500);
-
-        function finalizarTeste() {
-            tocarBip(); // Toca o bip ao finalizar
-            const duracaoSegs = Math.round((new Date() - horaInicio) / 1000);
-            const duracaoStr = `${Math.floor(duracaoSegs/60)}m ${duracaoSegs%60}s`;
-            status.innerHTML = `<div style="color:red">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
-            
-            let logs = JSON.parse(localStorage.getItem('testes') || '[]');
-            logs.unshift({ nome: "Teste " + (logs.
+    carregarHistorico();
+</script>
