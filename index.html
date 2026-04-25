@@ -1,64 +1,111 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="mobile-web-app-capable" content="yes">
-    <title>Teste de Lanterna</title>
+    <title>Monitor de Autonomia Pro</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; text-align: center; }
+        button { padding: 15px 30px; font-size: 18px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
+        #btnIniciar { background: #28a745; color: white; }
+        #btnReiniciar { background: #ffc107; display: none; }
+        #btnLimpar { background: #dc3545; color: white; font-size: 12px; padding: 5px 10px; margin-top: 10px; }
+        .teste-item { border-bottom: 1px solid #ccc; padding: 8px; background: #f9f9f9; }
+        #video { border: 2px solid #ccc; width: 100%; max-width: 320px; }
+    </style>
 </head>
-<body style="font-family: sans-serif; text-align: center; padding: 20px;">
+<body>
 
-    <h3>Monitor de Autonomia</h3>
-    <video id="video" width="100%" max-width="320" autoplay playsinline style="border: 2px solid #ccc;"></video>
-    <p id="status">Iniciando câmera...</p>
+    <h3>Monitor de Autonomia Pro</h3>
+    <video id="video" autoplay playsinline></video>
+    <br><br>
+    <button id="btnIniciar">INICIAR MONITORAMENTO</button>
+    <button id="btnReiniciar">REINICIAR TESTE</button>
+    <div id="status" style="margin-top: 15px; font-weight: bold;"></div>
+    <br>
+    <h4>Histórico:</h4>
+    <button id="btnLimpar">LIMPAR HISTÓRICO</button>
+    <div id="historico" style="text-align: left; font-size: 14px; margin-top: 10px;"></div>
 
     <script>
-        const video = document.getElementById('video');
-        const status = document.getElementById('status');
-        const horaInicio = new Date();
-        let limiar = 20; 
-        let detectado = false;
+        const video = document.getElementById('video'), status = document.getElementById('status'),
+              btnIniciar = document.getElementById('btnIniciar'), btnReiniciar = document.getElementById('btnReiniciar'),
+              btnLimpar = document.getElementById('btnLimpar'), divHistorico = document.getElementById('historico');
+        let wakeLock = null, horaInicio, rodando = false, pixelsBase = 0;
 
-        navigator.mediaDevices.getUserMedia({ video: true, facingMode: 'environment' })
-        .then(stream => {
-            video.srcObject = stream;
-            status.innerText = "Monitorando...";
-        })
-        .catch(err => {
-            status.innerText = "Erro ao acessar a câmera: " + err;
-        });
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+        .then(stream => { video.srcObject = stream; });
+
+        function carregarHistorico() {
+            const logs = JSON.parse(localStorage.getItem('testes') || '[]');
+            divHistorico.innerHTML = logs.map(t => `<div class="teste-item"><b>${t.nome}:</b> ${t.duracao} (Início: ${t.inicio})</div>`).join('');
+        }
+
+        btnLimpar.addEventListener('click', () => { localStorage.removeItem('testes'); carregarHistorico(); });
+
+        async function iniciarTeste() {
+            status.innerText = "Analisando ambiente atual...";
+            const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
+            const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
+            const frameBase = ctx.getImageData(0, 0, 320, 240).data;
+            pixelsBase = 0;
+            for (let i = 0; i < frameBase.length; i += 4) {
+                if (frameBase[i] > 250 && frameBase[i+1] > 250 && frameBase[i+2] > 250) pixelsBase++;
+            }
+
+            let count = 3;
+            let timer = setInterval(() => {
+                status.innerText = "Ligue a lanterna em: " + count;
+                count--;
+                if(count < 0) {
+                    clearInterval(timer);
+                    rodarMonitoramento();
+                }
+            }, 1000);
+        }
+
+        async function rodarMonitoramento() {
+            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+            horaInicio = new Date();
+            rodando = true;
+            btnIniciar.style.display = 'none'; btnReiniciar.style.display = 'none';
+            status.innerHTML = `<strong>Monitorando...</strong>`;
+        }
+
+        btnIniciar.addEventListener('click', iniciarTeste);
+        btnReiniciar.addEventListener('click', iniciarTeste);
 
         setInterval(() => {
-            const canvas = document.createElement('canvas');
-            canvas.width = 320; 
-            canvas.height = 240;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, 320, 240);
-            
+            if (!rodando) return;
+            const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
+            const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
             const frame = ctx.getImageData(0, 0, 320, 240).data;
-            let brilho = 0;
+            
+            let pixelsAtuais = 0;
             for (let i = 0; i < frame.length; i += 4) {
-                brilho += (frame[i] + frame[i+1] + frame[i+2]) / 3;
+                if (frame[i] > 250 && frame[i+1] > 250 && frame[i+2] > 250) pixelsAtuais++;
             }
-            brilho = brilho / (320 * 240);
 
-            if (!detectado && brilho < limiar) {
+            if (pixelsAtuais < (pixelsBase + 20)) { 
                 const horaFim = new Date();
-                const duracaoMs = horaFim - horaInicio;
-                const horas = Math.floor(duracaoMs / 3600000);
-                const minutos = Math.floor((duracaoMs % 3600000) / 60000);
-                const segundos = Math.floor((duracaoMs % 60000) / 1000);
-
-                status.innerHTML = `
-                    <div style="font-size: 20px; border: 3px solid green; padding: 15px; background: #e8f5e9; border-radius: 10px;">
-                        <strong>Apagou!</strong><br>
-                        Fim: ${horaFim.toLocaleTimeString()}<br>
-                        Duração: ${horas}h ${minutos}m ${segundos}s
-                    </div>
-                `;
-                detectado = true;
+                const duracao = Math.round((horaFim - horaInicio) / 1000);
+                const duracaoStr = `${Math.floor(duracao/60)}m ${duracao%60}s`;
+                status.innerHTML = `<div style="padding: 15px; background: #f8d7da; border: 2px solid red;">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
+                
+                let logs = JSON.parse(localStorage.getItem('testes') || '[]');
+                logs.unshift({ nome: "Teste " + (logs.length + 1), inicio: horaInicio.toLocaleTimeString(), duracao: duracaoStr });
+                localStorage.setItem('testes', JSON.stringify(logs.slice(0, 3)));
+                
+                rodando = false;
+                btnReiniciar.style.display = 'inline-block';
+                if (wakeLock) wakeLock.release();
+                carregarHistorico();
+            } else {
+                status.innerText = "Lanterna detectada (" + (pixelsAtuais - pixelsBase) + " pontos acima da base)";
             }
         }, 1000);
+
+        carregarHistorico();
     </script>
 </body>
 </html>
