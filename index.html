@@ -33,6 +33,13 @@
               btnLimpar = document.getElementById('btnLimpar'), divHistorico = document.getElementById('historico');
         let wakeLock = null, horaInicio, rodando = false, pixelsBase = 0;
 
+        // Função de voz (Aviso sonoro)
+        function falar(texto) {
+            const msg = new SpeechSynthesisUtterance(texto);
+            msg.lang = 'pt-BR';
+            window.speechSynthesis.speak(msg);
+        }
+
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => { video.srcObject = stream; });
 
@@ -44,6 +51,7 @@
         btnLimpar.addEventListener('click', () => { localStorage.removeItem('testes'); carregarHistorico(); });
 
         async function iniciarTeste() {
+            if (rodando) return;
             status.innerText = "Analisando ambiente atual...";
             const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
             const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
@@ -90,7 +98,11 @@
                 const horaFim = new Date();
                 const duracao = Math.round((horaFim - horaInicio) / 1000);
                 const duracaoStr = `${Math.floor(duracao/60)}m ${duracao%60}s`;
+                
                 status.innerHTML = `<div style="padding: 15px; background: #f8d7da; border: 2px solid red;">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
+                
+                // Dispara o aviso sonoro
+                falar("Teste finalizado. A duração foi de " + Math.floor(duracao/60) + " minutos e " + (duracao%60) + " segundos.");
                 
                 let logs = JSON.parse(localStorage.getItem('testes') || '[]');
                 logs.unshift({ nome: "Teste " + (logs.length + 1), inicio: horaInicio.toLocaleTimeString(), duracao: duracaoStr });
@@ -101,7 +113,7 @@
                 if (wakeLock) wakeLock.release();
                 carregarHistorico();
             } else {
-                status.innerText = "Lanterna detectada (" + (pixelsAtuais - pixelsBase) + " pontos acima da base)";
+                status.innerText = "Lanterna detectada (" + (pixelsAtuais - pixelsBase) + " pontos)";
             }
         }, 1000);
 
