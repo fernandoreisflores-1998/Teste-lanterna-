@@ -28,17 +28,25 @@
     <div id="historico" style="text-align: left; font-size: 14px; margin-top: 10px;"></div>
 
     <script>
+        // Cria o contexto de áudio para o bip
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function tocarBip() {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.type = 'square'; // Tipo de onda (parece um bip de máquina)
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // Frequência do bip
+            gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 1.5); // Duração de 1.5 segundos
+        }
+
         const video = document.getElementById('video'), status = document.getElementById('status'),
               btnIniciar = document.getElementById('btnIniciar'), btnReiniciar = document.getElementById('btnReiniciar'),
               btnLimpar = document.getElementById('btnLimpar'), divHistorico = document.getElementById('historico');
         let wakeLock = null, horaInicio, rodando = false, pixelsBase = 0;
-
-        // Função de voz (Aviso sonoro)
-        function falar(texto) {
-            const msg = new SpeechSynthesisUtterance(texto);
-            msg.lang = 'pt-BR';
-            window.speechSynthesis.speak(msg);
-        }
 
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => { video.srcObject = stream; });
@@ -52,7 +60,10 @@
 
         async function iniciarTeste() {
             if (rodando) return;
-            status.innerText = "Analisando ambiente atual...";
+            // Libera o áudio ao interagir
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            status.innerText = "Analisando ambiente...";
             const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
             const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
             const frameBase = ctx.getImageData(0, 0, 320, 240).data;
@@ -101,8 +112,8 @@
                 
                 status.innerHTML = `<div style="padding: 15px; background: #f8d7da; border: 2px solid red;">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
                 
-                // Dispara o aviso sonoro
-                falar("Teste finalizado. A duração foi de " + Math.floor(duracao/60) + " minutos e " + (duracao%60) + " segundos.");
+                // Toca o bip sonoro profissional
+                tocarBip();
                 
                 let logs = JSON.parse(localStorage.getItem('testes') || '[]');
                 logs.unshift({ nome: "Teste " + (logs.length + 1), inicio: horaInicio.toLocaleTimeString(), duracao: duracaoStr });
