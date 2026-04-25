@@ -10,10 +10,8 @@
         button { padding: 15px 30px; font-size: 18px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
         #btnIniciar { background: #28a745; color: white; }
         #btnReiniciar { background: #ffc107; display: none; }
-        #btnLimpar { background: #dc3545; color: white; font-size: 12px; padding: 5px 10px; margin-top: 10px; }
-        .teste-item { border-bottom: 1px solid #ccc; padding: 8px; background: #f9f9f9; }
         #video { border: 2px solid #ccc; width: 100%; max-width: 320px; }
-        #status { font-size: 18px; color: #333; margin-top: 15px; font-weight: bold; }
+        #status { font-size: 16px; color: #333; margin-top: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -24,13 +22,9 @@
     <button id="btnIniciar">INICIAR MONITORAMENTO</button>
     <button id="btnReiniciar">REINICIAR TESTE</button>
     <div id="status">Aguardando permissão da câmera...</div>
-    <br>
-    <h4>Histórico:</h4>
-    <button id="btnLimpar">LIMPAR HISTÓRICO</button>
-    <div id="historico" style="text-align: left; font-size: 14px; margin-top: 10px;"></div>
 
     <script>
-        // Registro Offline
+        // Registrar Offline
         if ('serviceWorker' in navigator) {
             const swCode = `self.addEventListener('fetch', (e) => { e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))); });`;
             const blob = new Blob([swCode], {type: 'application/javascript'});
@@ -49,18 +43,15 @@
         const video = document.getElementById('video'), status = document.getElementById('status'),
               btnIniciar = document.getElementById('btnIniciar'), btnReiniciar = document.getElementById('btnReiniciar');
         
-        let wakeLock = null, horaInicio, rodando = false, esperandoLanterna = false, pixelsBase = 0, contagemEscuridao = 0;
+        let wakeLock = null, horaInicio, rodando = false, esperandoLanterna = false, pixelsBase = 0, contadorFalhas = 0;
 
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-        .then(stream => { 
-            video.srcObject = stream; 
-            status.innerText = "Câmera pronta! Pressione INICIAR.";
-        }).catch(() => status.innerText = "ERRO: Permissão de câmera negada.");
+        .then(stream => { video.srcObject = stream; status.innerText = "Câmera pronta! Pressione INICIAR."; })
+        .catch(() => status.innerText = "ERRO: Permissão negada.");
 
         function iniciarTeste() {
             if (audioCtx.state === 'suspended') audioCtx.resume();
             
-            // Mede o ambiente
             const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
             const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
             const frameBase = ctx.getImageData(0, 0, 320, 240).data;
@@ -69,7 +60,7 @@
                 if (frameBase[i] > 250 && frameBase[i+1] > 250 && frameBase[i+2] > 250) pixelsBase++;
             }
             
-            status.innerHTML = "<strong>Instrução:</strong><br>Ligue a lanterna e aponte para a câmera.";
+            status.innerHTML = "<strong>Aguardando ativação:</strong><br>Ligue a lanterna para começar.";
             esperandoLanterna = true;
             btnIniciar.style.display = 'none';
         }
@@ -77,6 +68,7 @@
         btnIniciar.addEventListener('click', iniciarTeste);
         btnReiniciar.addEventListener('click', () => { location.reload(); });
 
+        // Loop mais rápido (500ms) para detectar variações instantâneas
         setInterval(() => {
             if (!esperandoLanterna && !rodando) return;
             
@@ -91,17 +83,18 @@
             if (esperandoLanterna) {
                 if (pixelsAtuais > (pixelsBase + 50)) rodarMonitoramento();
             } else if (rodando) {
-                // Filtro anti-falso: só encerra se o brilho cair abaixo do limite por 3 segundos seguidos
+                // Se a lanterna apagar (brilho cai abaixo da base)
                 if (pixelsAtuais < (pixelsBase + 20)) { 
-                    contagemEscuridao++;
-                    status.innerText = "Sombra detectada... Verificando: " + contagemEscuridao + "/3";
-                    if (contagemEscuridao >= 3) finalizarTeste();
+                    contadorFalhas++;
+                    // 3 segundos = 6 ciclos de 500ms
+                    if (contadorFalhas >= 6) finalizarTeste(); 
+                    else status.innerText = "Interferência detectada! Aguardando...";
                 } else {
-                    contagemEscuridao = 0; // Reseta se a luz voltar
-                    status.innerText = "Monitorando... (Lanterna ligada)";
+                    contadorFalhas = 0; // Se a luz volta, reseta o tempo de espera
+                    status.innerText = "Monitorando... (Lanterna OK)";
                 }
             }
-        }, 1000);
+        }, 500); 
 
         async function rodarMonitoramento() {
             try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
@@ -111,14 +104,9 @@
         }
 
         function finalizarTeste() {
-            const horaFim = new Date();
-            const duracao = Math.round((horaFim - horaInicio) / 1000);
-            const duracaoStr = `${Math.floor(duracao/60)}m ${duracao%60}s`;
-            status.innerHTML = `<div style="padding:15px; background:#f8d7da; border:2px solid red;">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
+            const duracao = Math.round((new Date() - horaInicio) / 1000);
+            status.innerHTML = `<div style="padding:15px; background:#f8d7da; border:2px solid red;">TESTE FINALIZADO!<br>Duração: ${Math.floor(duracao/60)}m ${duracao%60}s</div>`;
             tocarBip();
-            let logs = JSON.parse(localStorage.getItem('testes') || '[]');
-            logs.unshift({ nome: "Teste " + (logs.length + 1), inicio: horaInicio.toLocaleTimeString(), duracao: duracaoStr });
-            localStorage.setItem('testes', JSON.stringify(logs.slice(0, 3)));
             rodando = false;
             btnReiniciar.style.display = 'inline-block';
             if (wakeLock) wakeLock.release();
