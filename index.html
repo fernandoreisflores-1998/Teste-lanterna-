@@ -12,6 +12,7 @@
         #btnLimpar { background: #dc3545; color: white; font-size: 12px; padding: 5px 10px; margin-top: 10px; }
         .teste-item { border-bottom: 1px solid #ccc; padding: 8px; background: #f9f9f9; }
         #video { border: 2px solid #ccc; width: 100%; max-width: 320px; }
+        #status { font-size: 18px; color: #333; margin-top: 15px; }
     </style>
 </head>
 <body>
@@ -21,32 +22,30 @@
     <br><br>
     <button id="btnIniciar">INICIAR MONITORAMENTO</button>
     <button id="btnReiniciar">REINICIAR TESTE</button>
-    <div id="status" style="margin-top: 15px; font-weight: bold;"></div>
+    <div id="status">Pressione INICIAR para começar.</div>
     <br>
     <h4>Histórico:</h4>
     <button id="btnLimpar">LIMPAR HISTÓRICO</button>
     <div id="historico" style="text-align: left; font-size: 14px; margin-top: 10px;"></div>
 
     <script>
-        // Cria o contexto de áudio para o bip
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        
         function tocarBip() {
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.type = 'square'; // Tipo de onda (parece um bip de máquina)
-            osc.frequency.setValueAtTime(880, audioCtx.currentTime); // Frequência do bip
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(880, audioCtx.currentTime);
             gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 1.5); // Duração de 1.5 segundos
+            osc.start(); osc.stop(audioCtx.currentTime + 1.5);
         }
 
         const video = document.getElementById('video'), status = document.getElementById('status'),
               btnIniciar = document.getElementById('btnIniciar'), btnReiniciar = document.getElementById('btnReiniciar'),
               btnLimpar = document.getElementById('btnLimpar'), divHistorico = document.getElementById('historico');
-        let wakeLock = null, horaInicio, rodando = false, pixelsBase = 0;
+        
+        let wakeLock = null, horaInicio, rodando = false, esperandoLanterna = false, pixelsBase = 0;
+        let contagemEscuridao = 0; // Novo: Contador para evitar alarmes falsos
 
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => { video.srcObject = stream; });
@@ -58,11 +57,8 @@
 
         btnLimpar.addEventListener('click', () => { localStorage.removeItem('testes'); carregarHistorico(); });
 
-        async function iniciarTeste() {
-            if (rodando) return;
-            // Libera o áudio ao interagir
+        function iniciarTeste() {
             if (audioCtx.state === 'suspended') audioCtx.resume();
-            
             status.innerText = "Analisando ambiente...";
             const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
             const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
@@ -71,62 +67,60 @@
             for (let i = 0; i < frameBase.length; i += 4) {
                 if (frameBase[i] > 250 && frameBase[i+1] > 250 && frameBase[i+2] > 250) pixelsBase++;
             }
-
-            let count = 3;
-            let timer = setInterval(() => {
-                status.innerText = "Ligue a lanterna em: " + count;
-                count--;
-                if(count < 0) {
-                    clearInterval(timer);
-                    rodarMonitoramento();
-                }
-            }, 1000);
-        }
-
-        async function rodarMonitoramento() {
-            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
-            horaInicio = new Date();
-            rodando = true;
-            btnIniciar.style.display = 'none'; btnReiniciar.style.display = 'none';
-            status.innerHTML = `<strong>Monitorando...</strong>`;
+            status.innerHTML = "<strong>Instrução:</strong><br>Ligue a lanterna e aponte para a câmera.";
+            esperandoLanterna = true;
+            btnIniciar.style.display = 'none';
         }
 
         btnIniciar.addEventListener('click', iniciarTeste);
-        btnReiniciar.addEventListener('click', iniciarTeste);
+        btnReiniciar.addEventListener('click', () => { location.reload(); });
 
         setInterval(() => {
-            if (!rodando) return;
             const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
             const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
             const frame = ctx.getImageData(0, 0, 320, 240).data;
-            
             let pixelsAtuais = 0;
             for (let i = 0; i < frame.length; i += 4) {
                 if (frame[i] > 250 && frame[i+1] > 250 && frame[i+2] > 250) pixelsAtuais++;
             }
 
-            if (pixelsAtuais < (pixelsBase + 20)) { 
-                const horaFim = new Date();
-                const duracao = Math.round((horaFim - horaInicio) / 1000);
-                const duracaoStr = `${Math.floor(duracao/60)}m ${duracao%60}s`;
-                
-                status.innerHTML = `<div style="padding: 15px; background: #f8d7da; border: 2px solid red;">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
-                
-                // Toca o bip sonoro profissional
-                tocarBip();
-                
-                let logs = JSON.parse(localStorage.getItem('testes') || '[]');
-                logs.unshift({ nome: "Teste " + (logs.length + 1), inicio: horaInicio.toLocaleTimeString(), duracao: duracaoStr });
-                localStorage.setItem('testes', JSON.stringify(logs.slice(0, 3)));
-                
-                rodando = false;
-                btnReiniciar.style.display = 'inline-block';
-                if (wakeLock) wakeLock.release();
-                carregarHistorico();
-            } else {
-                status.innerText = "Lanterna detectada (" + (pixelsAtuais - pixelsBase) + " pontos)";
+            if (esperandoLanterna) {
+                if (pixelsAtuais > (pixelsBase + 50)) rodarMonitoramento();
+            } else if (rodando) {
+                // AQUI ESTÁ A MÁGICA:
+                if (pixelsAtuais < (pixelsBase + 20)) { 
+                    contagemEscuridao++; // Incrementa a contagem de erro
+                    status.innerText = "Sombra detectada... Verificando: " + contagemEscuridao + "/3";
+                    if (contagemEscuridao >= 3) finalizarTeste(); // Só encerra se falhar 3 vezes seguidas (3 segundos)
+                } else {
+                    contagemEscuridao = 0; // Reset: A luz voltou, foi só um susto!
+                    status.innerText = "Monitorando... (Lanterna ligada)";
+                }
             }
-        }, 1000);
+        }, 1000); // Checa a cada 1 segundo
+
+        async function rodarMonitoramento() {
+            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+            horaInicio = new Date();
+            rodando = true;
+            esperandoLanterna = false;
+            status.innerHTML = `<strong>Monitorando em tempo real...</strong>`;
+        }
+
+        function finalizarTeste() {
+            const horaFim = new Date();
+            const duracao = Math.round((horaFim - horaInicio) / 1000);
+            const duracaoStr = `${Math.floor(duracao/60)}m ${duracao%60}s`;
+            status.innerHTML = `<div style="padding: 15px; background: #f8d7da; border: 2px solid red;">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
+            tocarBip();
+            let logs = JSON.parse(localStorage.getItem('testes') || '[]');
+            logs.unshift({ nome: "Teste " + (logs.length + 1), inicio: horaInicio.toLocaleTimeString(), duracao: duracaoStr });
+            localStorage.setItem('testes', JSON.stringify(logs.slice(0, 3)));
+            rodando = false;
+            btnReiniciar.style.display = 'inline-block';
+            if (wakeLock) wakeLock.release();
+            carregarHistorico();
+        }
 
         carregarHistorico();
     </script>
