@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monitor de Autonomia Pro</title>
+    <link rel="manifest" href='data:application/json,{"name":"Monitor de Autonomia","short_name":"AutonomiaPro","start_url":"./","display":"standalone","background_color":"#ffffff","theme_color":"#28a745","icons":[{"src":"https://cdn-icons-png.flaticon.com/512/2906/2906274.png","sizes":"192x192","type":"image/png"}]}'>
     <style>
         body { font-family: sans-serif; padding: 20px; text-align: center; }
         button { padding: 15px 30px; font-size: 18px; border: none; border-radius: 5px; cursor: pointer; margin: 5px; }
@@ -29,6 +30,13 @@
     <div id="historico" style="text-align: left; font-size: 14px; margin-top: 10px;"></div>
 
     <script>
+        // Registrar Service Worker para Offline
+        if ('serviceWorker' in navigator) {
+            const swCode = `self.addEventListener('fetch', (e) => { e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))); });`;
+            const blob = new Blob([swCode], {type: 'application/javascript'});
+            navigator.serviceWorker.register(URL.createObjectURL(blob));
+        }
+
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         function tocarBip() {
             const osc = audioCtx.createOscillator();
@@ -44,8 +52,7 @@
               btnIniciar = document.getElementById('btnIniciar'), btnReiniciar = document.getElementById('btnReiniciar'),
               btnLimpar = document.getElementById('btnLimpar'), divHistorico = document.getElementById('historico');
         
-        let wakeLock = null, horaInicio, rodando = false, esperandoLanterna = false, pixelsBase = 0;
-        let contagemEscuridao = 0; // Novo: Contador para evitar alarmes falsos
+        let wakeLock = null, horaInicio, rodando = false, esperandoLanterna = false, pixelsBase = 0, contagemEscuridao = 0;
 
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => { video.srcObject = stream; });
@@ -59,7 +66,6 @@
 
         function iniciarTeste() {
             if (audioCtx.state === 'suspended') audioCtx.resume();
-            status.innerText = "Analisando ambiente...";
             const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
             const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
             const frameBase = ctx.getImageData(0, 0, 320, 240).data;
@@ -87,17 +93,15 @@
             if (esperandoLanterna) {
                 if (pixelsAtuais > (pixelsBase + 50)) rodarMonitoramento();
             } else if (rodando) {
-                // AQUI ESTÁ A MÁGICA:
                 if (pixelsAtuais < (pixelsBase + 20)) { 
-                    contagemEscuridao++; // Incrementa a contagem de erro
-                    status.innerText = "Sombra detectada... Verificando: " + contagemEscuridao + "/3";
-                    if (contagemEscuridao >= 3) finalizarTeste(); // Só encerra se falhar 3 vezes seguidas (3 segundos)
+                    contagemEscuridao++;
+                    if (contagemEscuridao >= 3) finalizarTeste();
                 } else {
-                    contagemEscuridao = 0; // Reset: A luz voltou, foi só um susto!
+                    contagemEscuridao = 0;
                     status.innerText = "Monitorando... (Lanterna ligada)";
                 }
             }
-        }, 1000); // Checa a cada 1 segundo
+        }, 1000);
 
         async function rodarMonitoramento() {
             try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
@@ -121,8 +125,8 @@
             if (wakeLock) wakeLock.release();
             carregarHistorico();
         }
-
         carregarHistorico();
     </script>
 </body>
 </html>
+
