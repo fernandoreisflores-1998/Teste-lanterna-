@@ -13,7 +13,7 @@
         #btnLimpar { background: #dc3545; color: white; font-size: 12px; padding: 5px 10px; margin-top: 10px; }
         .teste-item { border-bottom: 1px solid #ccc; padding: 8px; background: #f9f9f9; }
         #video { border: 2px solid #ccc; width: 100%; max-width: 320px; }
-        #status { font-size: 18px; color: #333; margin-top: 15px; }
+        #status { font-size: 18px; color: #333; margin-top: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -23,14 +23,14 @@
     <br><br>
     <button id="btnIniciar">INICIAR MONITORAMENTO</button>
     <button id="btnReiniciar">REINICIAR TESTE</button>
-    <div id="status">Pressione INICIAR para começar.</div>
+    <div id="status">Aguardando permissão da câmera...</div>
     <br>
     <h4>Histórico:</h4>
     <button id="btnLimpar">LIMPAR HISTÓRICO</button>
     <div id="historico" style="text-align: left; font-size: 14px; margin-top: 10px;"></div>
 
     <script>
-        // Registrar Service Worker para Offline
+        // Registro Offline
         if ('serviceWorker' in navigator) {
             const swCode = `self.addEventListener('fetch', (e) => { e.respondWith(caches.match(e.request).then(r => r || fetch(e.request))); });`;
             const blob = new Blob([swCode], {type: 'application/javascript'});
@@ -42,30 +42,25 @@
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.connect(gain); gain.connect(audioCtx.destination);
-            osc.type = 'square';
             osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
             osc.start(); osc.stop(audioCtx.currentTime + 1.5);
         }
 
         const video = document.getElementById('video'), status = document.getElementById('status'),
-              btnIniciar = document.getElementById('btnIniciar'), btnReiniciar = document.getElementById('btnReiniciar'),
-              btnLimpar = document.getElementById('btnLimpar'), divHistorico = document.getElementById('historico');
+              btnIniciar = document.getElementById('btnIniciar'), btnReiniciar = document.getElementById('btnReiniciar');
         
         let wakeLock = null, horaInicio, rodando = false, esperandoLanterna = false, pixelsBase = 0, contagemEscuridao = 0;
 
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-        .then(stream => { video.srcObject = stream; });
-
-        function carregarHistorico() {
-            const logs = JSON.parse(localStorage.getItem('testes') || '[]');
-            divHistorico.innerHTML = logs.map(t => `<div class="teste-item"><b>${t.nome}:</b> ${t.duracao} (Início: ${t.inicio})</div>`).join('');
-        }
-
-        btnLimpar.addEventListener('click', () => { localStorage.removeItem('testes'); carregarHistorico(); });
+        .then(stream => { 
+            video.srcObject = stream; 
+            status.innerText = "Câmera pronta! Pressione INICIAR.";
+        }).catch(() => status.innerText = "ERRO: Permissão de câmera negada.");
 
         function iniciarTeste() {
             if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            // Mede o ambiente
             const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
             const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
             const frameBase = ctx.getImageData(0, 0, 320, 240).data;
@@ -73,6 +68,7 @@
             for (let i = 0; i < frameBase.length; i += 4) {
                 if (frameBase[i] > 250 && frameBase[i+1] > 250 && frameBase[i+2] > 250) pixelsBase++;
             }
+            
             status.innerHTML = "<strong>Instrução:</strong><br>Ligue a lanterna e aponte para a câmera.";
             esperandoLanterna = true;
             btnIniciar.style.display = 'none';
@@ -82,6 +78,8 @@
         btnReiniciar.addEventListener('click', () => { location.reload(); });
 
         setInterval(() => {
+            if (!esperandoLanterna && !rodando) return;
+            
             const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 240;
             const ctx = canvas.getContext('2d'); ctx.drawImage(video, 0, 0, 320, 240);
             const frame = ctx.getImageData(0, 0, 320, 240).data;
@@ -93,11 +91,13 @@
             if (esperandoLanterna) {
                 if (pixelsAtuais > (pixelsBase + 50)) rodarMonitoramento();
             } else if (rodando) {
+                // Filtro anti-falso: só encerra se o brilho cair abaixo do limite por 3 segundos seguidos
                 if (pixelsAtuais < (pixelsBase + 20)) { 
                     contagemEscuridao++;
+                    status.innerText = "Sombra detectada... Verificando: " + contagemEscuridao + "/3";
                     if (contagemEscuridao >= 3) finalizarTeste();
                 } else {
-                    contagemEscuridao = 0;
+                    contagemEscuridao = 0; // Reseta se a luz voltar
                     status.innerText = "Monitorando... (Lanterna ligada)";
                 }
             }
@@ -108,14 +108,13 @@
             horaInicio = new Date();
             rodando = true;
             esperandoLanterna = false;
-            status.innerHTML = `<strong>Monitorando em tempo real...</strong>`;
         }
 
         function finalizarTeste() {
             const horaFim = new Date();
             const duracao = Math.round((horaFim - horaInicio) / 1000);
             const duracaoStr = `${Math.floor(duracao/60)}m ${duracao%60}s`;
-            status.innerHTML = `<div style="padding: 15px; background: #f8d7da; border: 2px solid red;">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
+            status.innerHTML = `<div style="padding:15px; background:#f8d7da; border:2px solid red;">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
             tocarBip();
             let logs = JSON.parse(localStorage.getItem('testes') || '[]');
             logs.unshift({ nome: "Teste " + (logs.length + 1), inicio: horaInicio.toLocaleTimeString(), duracao: duracaoStr });
@@ -123,10 +122,7 @@
             rodando = false;
             btnReiniciar.style.display = 'inline-block';
             if (wakeLock) wakeLock.release();
-            carregarHistorico();
         }
-        carregarHistorico();
     </script>
 </body>
 </html>
-
