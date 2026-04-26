@@ -34,7 +34,6 @@
     <div id="historico" style="text-align: left; font-size: 14px; margin-top: 10px;"></div>
 
     <script>
-        // Configuração de Áudio
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         function tocarBip() {
             if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -57,7 +56,6 @@
 
         let rodando = false, esperandoLanterna = false, base = 0, falhas = 0, horaInicio;
 
-        // Inicia a câmera
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
         .then(stream => { 
             video.srcObject = stream; 
@@ -107,7 +105,13 @@
         function finalizarTeste() {
             tocarBip();
             const duracaoSegs = Math.round((new Date() - horaInicio) / 1000);
-            const duracaoStr = `${Math.floor(duracaoSegs/60)}m ${duracaoSegs%60}s`;
+            
+            // Lógica para transformar em Horas, Minutos e Segundos
+            const h = Math.floor(duracaoSegs / 3600);
+            const m = Math.floor((duracaoSegs % 3600) / 60);
+            const s = duracaoSegs % 60;
+            const duracaoStr = `${h}h ${m}m ${s}s`;
+
             status.innerHTML = `<div style="color:red">TESTE FINALIZADO!<br>Duração: ${duracaoStr}</div>`;
             
             let logs = JSON.parse(localStorage.getItem('testes') || '[]');
